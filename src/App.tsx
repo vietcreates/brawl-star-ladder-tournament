@@ -47,6 +47,38 @@ export default function App() {
         </div>
       </header>
 
+      {/* Rules */}
+      <section className="card rules-card">
+        <h2>📋 Rules</h2>
+        <ul className="rules-list">
+          <li><strong>Game Mode:</strong> Duel</li>
+          <li><strong>Format:</strong> Best of 3 on the selected map for each round</li>
+          <li>You <strong>may switch brawlers</strong> between rounds of the match</li>
+          <li>After a match is decided, the <strong>winner reports</strong> back to the organizer so the ladder can be updated</li>
+          <li>Once the bracket is set, <strong>no re-matches</strong> — results are final</li>
+        </ul>
+      </section>
+
+      {/* Prizes */}
+      <section className="card prizes-card">
+        <h2>🎁 Prizes</h2>
+        <div className="prizes">
+          <div className="prize first">
+            <span className="prize-place">🥇 1st Place</span>
+            <span className="prize-reward">$15 Google Play Gift Card</span>
+          </div>
+          <div className="prize second">
+            <span className="prize-place">🥈 2nd Place</span>
+            <span className="prize-reward">$5 Amazon Gift Card</span>
+          </div>
+          <div className="prize third">
+            <span className="prize-place">🥉 3rd Place</span>
+            <span className="prize-reward">$5 Amazon Gift Card</span>
+          </div>
+        </div>
+        <p className="prize-note">Gift cards can be redeemed online. Codes will be provided to the winners.</p>
+      </section>
+
       {admin && !started && (
         <section className="card">
           <h2>Add Player</h2>

@@ -10,16 +10,16 @@ type Props = {
   onSetMap: (roundNumber: number, map: string | null) => void;
 };
 
-// Geometry
-const SLOT_W   = 120;
-const SLOT_H   = 40;
-const INNER_GAP = 8;
-const PAD       = 6;
-const BOX_W     = 2 * SLOT_W + INNER_GAP + 2 * PAD;  // 260
-const BOX_H     = SLOT_H + 2 * PAD;                   // 52
-const BOX_GAP   = 32;
-const ROW_PITCH = 110;
-const GUTTER    = 130;
+// Geometry — bigger bracket
+const SLOT_W   = 140;
+const SLOT_H   = 46;
+const INNER_GAP = 10;
+const PAD       = 7;
+const BOX_W     = 2 * SLOT_W + INNER_GAP + 2 * PAD;
+const BOX_H     = SLOT_H + 2 * PAD;
+const BOX_GAP   = 40;
+const ROW_PITCH = 130;
+const GUTTER    = 150;
 
 export default function BracketTree({ players, rounds, activeRound, championId, admin, onSetMap }: Props) {
   const pname = (id: string | null) => id ? (players.find(p => p.id === id)?.name ?? '???') : null;
@@ -158,14 +158,18 @@ export default function BracketTree({ players, rounds, activeRound, championId, 
               <div className="round-side abs" style={{ top: yRound(r), height: BOX_H }}>
                 <span className={`row-label${isActive ? ' active' : ''}`}>{roundLabel(r)}</span>
                 {admin && isActive ? (
-                  <select className="map-select" value={map ?? ''} onChange={e => onSetMap(r, e.target.value || null)}>
-                    <option value="">Pick map…</option>
-                    {MAPS.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
+                  <div className="map-control">
+                    <span className="map-label">Map</span>
+                    <select className="map-select" value={map ?? ''} onChange={e => onSetMap(r, e.target.value || null)}>
+                      <option value="">Pick map…</option>
+                      {MAPS.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
                 ) : map ? (
-                  <span className="map-badge">🗺️ {map}</span>
-                ) : isActive ? (
-                  <span className="map-badge muted">No map</span>
+                  <div className="map-control">
+                    <span className="map-label">Map</span>
+                    <span className="map-badge">🗺️ {map}</span>
+                  </div>
                 ) : null}
               </div>
 
@@ -196,14 +200,18 @@ export default function BracketTree({ players, rounds, activeRound, championId, 
                 Play-in
               </span>
               {admin && playInIsActive ? (
-                <select className="map-select" value={playInRound?.map ?? ''} onChange={e => onSetMap(0, e.target.value || null)}>
-                  <option value="">Pick map…</option>
-                  {MAPS.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+                <div className="map-control">
+                  <span className="map-label">Map</span>
+                  <select className="map-select" value={playInRound?.map ?? ''} onChange={e => onSetMap(0, e.target.value || null)}>
+                    <option value="">Pick map…</option>
+                    {MAPS.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
               ) : playInRound?.map ? (
-                <span className="map-badge">🗺️ {playInRound.map}</span>
-              ) : playInIsActive ? (
-                <span className="map-badge muted">No map</span>
+                <div className="map-control">
+                  <span className="map-label">Map</span>
+                  <span className="map-badge">🗺️ {playInRound.map}</span>
+                </div>
               ) : null}
             </div>
 
