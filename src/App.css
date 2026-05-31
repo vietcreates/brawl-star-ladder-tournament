@@ -545,9 +545,12 @@ td.actions button.remove:hover { border-color: var(--red); color: var(--red); }
   padding: 8px 12px;
 }
 
-.matchup-box.bye-box {
-  border-color: var(--border);
-  opacity: 0.6;
+.matchup-box.play-in-box {
+  border-color: var(--yellow);
+  background: #2a2812;
+}
+.matchup-box.play-in-box.active {
+  box-shadow: 0 0 0 1px var(--yellow), 0 0 14px #f5c51833;
 }
 
 .hint { font-size: 0.82rem; color: var(--muted); }

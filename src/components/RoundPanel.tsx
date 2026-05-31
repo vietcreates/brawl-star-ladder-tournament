@@ -58,17 +58,17 @@ export default function RoundPanel({
 
   // Separate real matchups from byes
   const realMatchups = currentRound.matchups.filter(m => m.bId !== null);
-  const byeMatchups  = currentRound.matchups.filter(m => m.bId === null);
-  const allResolved  = currentRound.matchups.every(m => m.winnerId);
-  const realAllDone  = realMatchups.every(m => m.winnerId);
-  const anyRealResult = realMatchups.some(m => m.winnerId);
-  const canReseed = currentRound.number === 1 && !anyRealResult;
+  const allResolved   = currentRound.matchups.every(m => m.winnerId);
+  const realAllDone   = realMatchups.every(m => m.winnerId);
+  const anyResult     = currentRound.matchups.some(m => m.winnerId);
+  const canReseed     = currentRound.number <= 1 && !anyResult;
+  const isPlayIn      = !!currentRound.isPlayIn;
 
   return (
     <div className="round">
       <div className="round-head">
         <h2>
-          {isFinals ? 'Finals' : `Round ${currentRound.number}`}
+          {isPlayIn ? 'Play-in Round' : isFinals ? 'Finals' : `Round ${currentRound.number}`}
           {currentRound.map && <span className="map-badge inline">🗺️ {currentRound.map}</span>}
         </h2>
         {admin && canReseed && (
@@ -82,10 +82,10 @@ export default function RoundPanel({
         <p className="hint">Tip: pick this round's map in the bracket section below.</p>
       )}
 
-      {/* Bye notice */}
-      {byeMatchups.length > 0 && (
+      {/* Play-in context hint */}
+      {isPlayIn && (
         <div className="bye-notice">
-          ⏫ {byeMatchups.map(m => name(m.aId)).join(', ')} advance{byeMatchups.length === 1 ? 's' : ''} automatically (bye)
+          🎮 Winners advance to <strong>Round 1</strong>. Losers are eliminated.
         </div>
       )}
 
@@ -118,7 +118,9 @@ export default function RoundPanel({
         <p className="hint">Tap each match's winner as players report results.</p>
       )}
       {admin && allResolved && !isFinals && (
-        <button className="primary big" onClick={onBeginNext}>End Round → Begin Next Round</button>
+        <button className="primary big" onClick={onBeginNext}>
+          {isPlayIn ? 'End Play-in → Begin Round 1' : 'End Round → Begin Next Round'}
+        </button>
       )}
       {admin && allResolved && isFinals && (
         <p className="hint done">Champion decided — see the trophy above! 🏆</p>

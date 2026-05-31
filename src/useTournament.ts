@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { v4 as uuid } from 'uuid';
 import type { Player, Round } from './types';
-import { nextPow2 } from './types';
+import { isPow2, prevPow2 } from './types';
 import { loadPlayers, savePlayers, loadRounds, saveRounds, loadActive, saveActive } from './store';
 
 type TState = { players: Player[]; rounds: Round[]; activeRound: number };
@@ -15,10 +15,34 @@ function saveLocal(s: TState) {
   saveActive(s.activeRound);
 }
 
-// Recompute every upper round from the round below, clearing now-invalid winners.
+/**
+ * Sync winners upward through the bracket.
+ * - Play-in winners flow into the bId slots of the last `extra` Round 1 matchups.
+ * - Round 1+ winners flow into upper rounds normally.
+ */
 function syncBracket(rounds: Round[]): Round[] {
   const rs = rounds.map(r => ({ ...r, matchups: r.matchups.map(m => ({ ...m })) }));
-  for (let r = 1; r < rs.length; r++) {
+  const playInIdx = rs.findIndex(r => r.isPlayIn);
+  const mainStart = playInIdx >= 0 ? playInIdx + 1 : 0;
+
+  // Play-in → Round 1 bId slots (last `extra` matchups of Round 1)
+  if (playInIdx >= 0 && mainStart < rs.length) {
+    const pi = rs[playInIdx];
+    const r1 = rs[mainStart];
+    const extra = pi.matchups.length;
+    pi.matchups.forEach((m, k) => {
+      const r1Idx = r1.matchups.length - extra + k;
+      r1.matchups[r1Idx].bId = m.winnerId;
+      if (r1.matchups[r1Idx].winnerId &&
+          r1.matchups[r1Idx].winnerId !== r1.matchups[r1Idx].aId &&
+          r1.matchups[r1Idx].winnerId !== m.winnerId) {
+        r1.matchups[r1Idx].winnerId = null;
+      }
+    });
+  }
+
+  // Round 1 → Round 2 → … (standard sync)
+  for (let r = mainStart + 1; r < rs.length; r++) {
     const prev = rs[r - 1];
     rs[r].matchups.forEach((m, k) => {
       const a = prev.matchups[2 * k]?.winnerId ?? null;
@@ -59,40 +83,55 @@ export function useTournament() {
   const buildSeed = useCallback((): TState | null => {
     const N = players.length;
     if (N < 2) return null;
-    const P = nextPow2(N);            // bracket size (next power of 2)
-    const byes = P - N;               // how many bye slots needed
+    const P = isPow2(N) ? N : prevPow2(N);  // main bracket size
+    const extra = N - P;                     // play-in winners needed
+    const playInCount = extra * 2;           // players in play-in
 
-    // Shuffle player IDs
+    // Shuffle all player IDs
     const ids = players.map(p => p.id);
     for (let i = ids.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [ids[i], ids[j]] = [ids[j], ids[i]];
     }
-
-    // Build Round 1: pair players, giving first `byes` players a free BYE slot.
-    // A bye matchup has bId = null and winnerId pre-set to the player's id.
-    const R = Math.log2(P);
-    const first = [];
-    let idx = 0;
-    for (let slot = 0; slot < P / 2; slot++) {
-      if (byes > slot) {
-        // This slot is a bye — one real player, opponent = null, auto-win
-        const playerId = ids[idx++];
-        first.push({ id: uuid(), aId: playerId, bId: null, winnerId: playerId });
-      } else {
-        first.push({ id: uuid(), aId: ids[idx++], bId: ids[idx++], winnerId: null });
-      }
-    }
+    const playInIds = ids.slice(0, playInCount);
+    const directIds = ids.slice(playInCount);   // length = directCount
 
     const rs: Round[] = [];
-    rs.push({ number: 1, map: null, matchups: first });
+
+    // Play-in round (only if there are extra players)
+    if (extra > 0) {
+      const piMatchups = [];
+      for (let i = 0; i < playInCount; i += 2) {
+        piMatchups.push({ id: uuid(), aId: playInIds[i], bId: playInIds[i + 1], winnerId: null });
+      }
+      rs.push({ number: 0, map: null, matchups: piMatchups, isPlayIn: true });
+    }
+
+    // Round 1:  (P/2 matchups)
+    //   First (P/2 - extra) matchups: two direct players each
+    //   Last  `extra` matchups:       one direct player (aId) + play-in winner (bId, null for now)
+    const r1Matchups = [];
+    let dIdx = 0;
+    const fullDirect = P / 2 - extra;
+    for (let i = 0; i < fullDirect; i++) {
+      r1Matchups.push({ id: uuid(), aId: directIds[dIdx++], bId: directIds[dIdx++], winnerId: null });
+    }
+    for (let i = 0; i < extra; i++) {
+      r1Matchups.push({ id: uuid(), aId: directIds[dIdx++], bId: null, winnerId: null });
+    }
+    rs.push({ number: 1, map: null, matchups: r1Matchups });
+
+    // Rounds 2 … Finals (all TBD)
+    const R = Math.log2(P);
     let count = P / 2;
     for (let r = 2; r <= R; r++) {
       count /= 2;
-      rs.push({ number: r, map: null, matchups: Array.from({ length: count }, () => ({ id: uuid(), aId: null, bId: null, winnerId: null })) });
+      rs.push({
+        number: r, map: null,
+        matchups: Array.from({ length: count }, () => ({ id: uuid(), aId: null, bId: null, winnerId: null })),
+      });
     }
 
-    // Sync so bye winners flow up immediately
     return { players, rounds: syncBracket(rs), activeRound: 1 };
   }, [players]);
 
@@ -103,9 +142,7 @@ export function useTournament() {
 
   const reseed = useCallback(() => {
     if (rounds.length === 0) return;
-    // Only allow reseed if no real (non-bye) results recorded yet
-    const hasRealResult = rounds[0].matchups.some(m => m.bId !== null && m.winnerId);
-    if (hasRealResult) return;
+    if (rounds[0].matchups.some(m => m.winnerId)) return; // results already recorded
     const next = buildSeed();
     if (next) commit(next);
   }, [rounds, buildSeed, commit]);
@@ -118,7 +155,6 @@ export function useTournament() {
     if (!currentRound) return;
     const rs = rounds.map(r => ({ ...r, matchups: r.matchups.map(m => ({ ...m })) }));
     const m = rs[activeRound - 1].matchups.find(x => x.id === matchupId);
-    // Only allow resolving real (non-bye) matchups
     if (!m || !m.aId || !m.bId) return;
     m.winnerId = m.winnerId === winnerId ? null : winnerId;
     commit({ ...state, rounds: syncBracket(rs) });
