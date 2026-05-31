@@ -38,7 +38,7 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>🏆 Brawl Stars Ladder</h1>
+        <h1>🏆 YaayZe Brawl Stars Ladder</h1>
         <div className="header-actions">
           {admin && <button className="reset-btn" onClick={handleReset}>Reset All</button>}
           <button className={`lock-btn${admin ? ' on' : ''}`} onClick={onManageClick}>
