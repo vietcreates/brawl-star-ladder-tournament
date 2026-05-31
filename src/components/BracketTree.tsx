@@ -1,0 +1,168 @@
+import type { Player, Round, Matchup } from '../types';
+import { MAPS, isPowerOfTwo } from '../types';
+
+type Props = {
+  players: Player[];
+  rounds: Round[];
+  activeRound: number;       // 0 = not started / nothing active
+  championId: string | null;
+  admin: boolean;
+  onSetMap: (roundNumber: number, map: string | null) => void;
+};
+
+// Geometry
+const SLOT_W = 120;
+const SLOT_H = 40;
+const INNER_GAP = 8;          // gap between the two slots inside a matchup
+const PAD = 6;                // box padding
+const BOX_W = 2 * SLOT_W + INNER_GAP + 2 * PAD;
+const BOX_H = SLOT_H + 2 * PAD;
+const BOX_GAP = 32;           // gap between matchups in a row
+const ROW_PITCH = 110;        // vertical distance between rounds
+const GUTTER = 130;           // left column for round labels + map
+
+export default function BracketTree({ players, rounds, activeRound, championId, admin, onSetMap }: Props) {
+  const name = (id: string | null) => id ? (players.find(p => p.id === id)?.name ?? '???') : null;
+  const isSub = (id: string | null) => !!id && (players.find(p => p.id === id)?.isSub ?? false);
+
+  const started = rounds.length > 0;
+  const N = started ? rounds[0].matchups.length * 2 : players.length;
+
+  if (!isPowerOfTwo(N)) {
+    const valid = [2, 4, 8, 16, 32];
+    const lower = valid.filter(v => v < players.length).pop();
+    const higher = valid.find(v => v > players.length);
+    return (
+      <div className="bracket-msg">
+        <p>The bracket needs a <strong>power-of-two</strong> number of players so every round has even pairings — no byes, never an odd round.</p>
+        <p className="hint">
+          Valid sizes: 2, 4, 8, 16, 32. You have <strong>{players.length}</strong>
+          {players.length > 0 && (lower || higher) && (
+            <> — {higher ? <>add {higher - players.length} for {higher}</> : null}
+              {lower && higher ? ', or ' : lower ? ' — ' : ''}
+              {lower ? <>remove {players.length - lower} for {lower}</> : null}.</>
+          )}
+        </p>
+      </div>
+    );
+  }
+
+  const R = Math.log2(N); // number of rounds (matchup layers)
+
+  // matchup at round r (1-based), index b — from real rounds, or a pre-start preview
+  const cell = (r: number, b: number): Matchup => {
+    const round = rounds[r - 1];
+    if (round) return round.matchups[b];
+    if (r === 1) {
+      return { id: `p${b}`, aId: players[2 * b]?.id ?? null, bId: players[2 * b + 1]?.id ?? null, winnerId: null };
+    }
+    return { id: `e${r}-${b}`, aId: null, bId: null, winnerId: null };
+  };
+
+  // Box center x per round, computed bottom-up so parents sit over their two children
+  const centers: number[][] = [];
+  centers[1] = Array.from({ length: N / 2 }, (_, b) => b * (BOX_W + BOX_GAP) + BOX_W / 2);
+  for (let r = 2; r <= R; r++) {
+    const cnt = N / 2 ** r;
+    centers[r] = Array.from({ length: cnt }, (_, b) => (centers[r - 1][2 * b] + centers[r - 1][2 * b + 1]) / 2);
+  }
+  const totalW = (N / 2) * BOX_W + (N / 2 - 1) * BOX_GAP;
+  const championX = centers[R][0];
+
+  // y (top edge) per round: round 1 at bottom, champion at top (y = 0)
+  const yRound = (r: number) => (R - r + 1) * ROW_PITCH;
+  const yChamp = 0;
+  const totalH = R * ROW_PITCH + BOX_H;
+
+  // Connector segments (SVG). Green once the feeding matchup is decided.
+  const lines: { x1: number; y1: number; x2: number; y2: number; green: boolean }[] = [];
+  for (let r = 1; r <= R; r++) {
+    const cnt = N / 2 ** r;
+    for (let b = 0; b < cnt; b++) {
+      const childTopX = GUTTER + centers[r][b];
+      const childTopY = yRound(r);
+      const parentX = r < R ? GUTTER + centers[r + 1][Math.floor(b / 2)] : GUTTER + championX;
+      const parentBottomY = r < R ? yRound(r + 1) + BOX_H : yChamp + SLOT_H;
+      lines.push({ x1: childTopX, y1: childTopY, x2: parentX, y2: parentBottomY, green: !!cell(r, b).winnerId });
+    }
+  }
+
+  const Slot = ({ id, won, lost, champ }: { id: string | null; won?: boolean; lost?: boolean; champ?: boolean }) => (
+    <div className={`bslot${id ? ' filled' : ' empty'}${won ? ' won' : ''}${lost ? ' lost' : ''}${champ ? ' champ' : ''}`}>
+      {champ && id && <span className="crown">👑</span>}
+      <span className="bslot-name">{name(id) ?? 'TBD'}</span>
+      {isSub(id) && <span className="sub-badge">SUB</span>}
+    </div>
+  );
+
+  const label = (r: number) => (r === R ? 'Finals' : `Round ${r}`);
+
+  return (
+    <div className="bracket-scroll">
+      <div className="bracket-tree" style={{ width: GUTTER + totalW, height: totalH }}>
+        <svg className="bracket-lines" width={GUTTER + totalW} height={totalH}>
+          {lines.map((l, i) => (
+            <polyline
+              key={i}
+              points={`${l.x1},${l.y1} ${l.x1},${(l.y1 + l.y2) / 2} ${l.x2},${(l.y1 + l.y2) / 2} ${l.x2},${l.y2}`}
+              className={`connector${l.green ? ' green' : ''}`}
+            />
+          ))}
+        </svg>
+
+        {/* Champion slot */}
+        <div className="bbox champion-box" style={{ left: GUTTER + championX - SLOT_W / 2, top: yChamp, width: SLOT_W, height: SLOT_H }}>
+          <Slot id={championId} champ won={!!championId} />
+        </div>
+
+        {/* Round rows */}
+        {Array.from({ length: R }, (_, ri) => {
+          const r = ri + 1;
+          const cnt = N / 2 ** r;
+          const map = rounds[r - 1]?.map ?? null;
+          const isActive = r === activeRound;
+          return (
+            <div key={r}>
+              {/* Side label + map control */}
+              <div className="round-side abs" style={{ top: yRound(r), height: BOX_H }}>
+                <span className={`row-label${isActive ? ' active' : ''}`}>{label(r)}</span>
+                {admin && isActive ? (
+                  <select className="map-select" value={map ?? ''} onChange={e => onSetMap(r, e.target.value || null)}>
+                    <option value="">Pick map…</option>
+                    {MAPS.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                ) : map ? (
+                  <span className="map-badge">🗺️ {map}</span>
+                ) : isActive ? (
+                  <span className="map-badge muted">No map</span>
+                ) : null}
+              </div>
+
+              {/* Matchup boxes */}
+              {Array.from({ length: cnt }, (_, b) => {
+                const m = cell(r, b);
+                const aWon = !!m.winnerId && m.winnerId === m.aId;
+                const bWon = !!m.winnerId && m.winnerId === m.bId;
+                return (
+                  <div
+                    key={b}
+                    className={`bbox matchup-box${isActive ? ' active' : ''}${m.winnerId ? ' done' : ''}`}
+                    style={{ left: GUTTER + centers[r][b] - BOX_W / 2, top: yRound(r), width: BOX_W, height: BOX_H }}
+                  >
+                    <Slot id={m.aId} won={aWon} lost={bWon} />
+                    <Slot id={m.bId} won={bWon} lost={aWon} />
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {/* Champion side label */}
+        <div className="round-side abs" style={{ top: yChamp, height: SLOT_H }}>
+          <span className="row-label champ">🏆 Champion</span>
+        </div>
+      </div>
+    </div>
+  );
+}
