@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { v4 as uuid } from 'uuid';
 import type { Player, Round } from './types';
-import { isPowerOfTwo } from './types';
+import { nextPow2 } from './types';
 import { loadPlayers, savePlayers, loadRounds, saveRounds, loadActive, saveActive } from './store';
 
 type TState = { players: Player[]; rounds: Round[]; activeRound: number };
@@ -41,7 +41,7 @@ export function useTournament() {
 
   const { players, rounds, activeRound } = state;
   const started = rounds.length > 0;
-  const canStart = isPowerOfTwo(players.length);
+  const canStart = players.length >= 2;
   const championId = started ? rounds[rounds.length - 1].matchups[0].winnerId : null;
   const isFinals = started && activeRound === rounds.length;
   const currentRound = (!started || championId) ? null : rounds[activeRound - 1] ?? null;
@@ -58,23 +58,42 @@ export function useTournament() {
 
   const buildSeed = useCallback((): TState | null => {
     const N = players.length;
-    if (!isPowerOfTwo(N)) return null;
+    if (N < 2) return null;
+    const P = nextPow2(N);            // bracket size (next power of 2)
+    const byes = P - N;               // how many bye slots needed
+
+    // Shuffle player IDs
     const ids = players.map(p => p.id);
     for (let i = ids.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [ids[i], ids[j]] = [ids[j], ids[i]];
     }
-    const R = Math.log2(N);
-    const rs: Round[] = [];
+
+    // Build Round 1: pair players, giving first `byes` players a free BYE slot.
+    // A bye matchup has bId = null and winnerId pre-set to the player's id.
+    const R = Math.log2(P);
     const first = [];
-    for (let i = 0; i < N; i += 2) first.push({ id: uuid(), aId: ids[i], bId: ids[i + 1], winnerId: null });
+    let idx = 0;
+    for (let slot = 0; slot < P / 2; slot++) {
+      if (byes > slot) {
+        // This slot is a bye — one real player, opponent = null, auto-win
+        const playerId = ids[idx++];
+        first.push({ id: uuid(), aId: playerId, bId: null, winnerId: playerId });
+      } else {
+        first.push({ id: uuid(), aId: ids[idx++], bId: ids[idx++], winnerId: null });
+      }
+    }
+
+    const rs: Round[] = [];
     rs.push({ number: 1, map: null, matchups: first });
-    let count = N / 2;
+    let count = P / 2;
     for (let r = 2; r <= R; r++) {
       count /= 2;
       rs.push({ number: r, map: null, matchups: Array.from({ length: count }, () => ({ id: uuid(), aId: null, bId: null, winnerId: null })) });
     }
-    return { players, rounds: rs, activeRound: 1 };
+
+    // Sync so bye winners flow up immediately
+    return { players, rounds: syncBracket(rs), activeRound: 1 };
   }, [players]);
 
   const seedBracket = useCallback(() => {
@@ -83,7 +102,10 @@ export function useTournament() {
   }, [buildSeed, commit]);
 
   const reseed = useCallback(() => {
-    if (rounds.length === 0 || rounds[0].matchups.some(m => m.winnerId)) return;
+    if (rounds.length === 0) return;
+    // Only allow reseed if no real (non-bye) results recorded yet
+    const hasRealResult = rounds[0].matchups.some(m => m.bId !== null && m.winnerId);
+    if (hasRealResult) return;
     const next = buildSeed();
     if (next) commit(next);
   }, [rounds, buildSeed, commit]);
@@ -96,6 +118,7 @@ export function useTournament() {
     if (!currentRound) return;
     const rs = rounds.map(r => ({ ...r, matchups: r.matchups.map(m => ({ ...m })) }));
     const m = rs[activeRound - 1].matchups.find(x => x.id === matchupId);
+    // Only allow resolving real (non-bye) matchups
     if (!m || !m.aId || !m.bId) return;
     m.winnerId = m.winnerId === winnerId ? null : winnerId;
     commit({ ...state, rounds: syncBracket(rs) });

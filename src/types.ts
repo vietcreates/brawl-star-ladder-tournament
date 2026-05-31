@@ -25,7 +25,9 @@ export const MAPS = [
   'Coin Flip',
 ] as const;
 
-// A clean bracket with no byes requires a power-of-two field (2, 4, 8, 16, 32…).
-export function isPowerOfTwo(n: number): boolean {
-  return n >= 2 && (n & (n - 1)) === 0;
+// Returns the smallest power of 2 that is >= n (minimum 2).
+export function nextPow2(n: number): number {
+  let p = 2;
+  while (p < n) p *= 2;
+  return p;
 }

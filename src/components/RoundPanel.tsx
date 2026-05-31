@@ -1,5 +1,4 @@
 import type { Player, Round } from '../types';
-import { isPowerOfTwo } from '../types';
 
 type Props = {
   players: Player[];
@@ -40,17 +39,16 @@ export default function RoundPanel({
         {admin ? (
           canStart ? (
             <>
-              <p className="hint">{players.length} players ready — shuffle to seed the bracket.</p>
+              <p className="hint">
+                {players.length} players ready — shuffle to seed the bracket.
+              </p>
               <button className="primary big" onClick={onSeed}>🎲 Shuffle &amp; Start Bracket</button>
             </>
           ) : (
-            <p className="hint">
-              Add players until you reach a <strong>power-of-two</strong> count (2, 4, 8, 16, 32).
-              You have <strong>{players.length}</strong>{!isPowerOfTwo(players.length) && players.length >= 2 ? ' — not a valid bracket size yet.' : '.'}
-            </p>
+            <p className="hint">Add at least <strong>2 players</strong> to start.</p>
           )
         ) : (
-          <p className="empty">The tournament hasn’t started yet.</p>
+          <p className="empty">The tournament hasn't started yet.</p>
         )}
       </div>
     );
@@ -58,9 +56,13 @@ export default function RoundPanel({
 
   if (!currentRound) return null;
 
-  const allResolved = currentRound.matchups.every(m => m.winnerId);
-  const anyResult = currentRound.matchups.some(m => m.winnerId);
-  const canReseed = currentRound.number === 1 && !anyResult;
+  // Separate real matchups from byes
+  const realMatchups = currentRound.matchups.filter(m => m.bId !== null);
+  const byeMatchups  = currentRound.matchups.filter(m => m.bId === null);
+  const allResolved  = currentRound.matchups.every(m => m.winnerId);
+  const realAllDone  = realMatchups.every(m => m.winnerId);
+  const anyRealResult = realMatchups.some(m => m.winnerId);
+  const canReseed = currentRound.number === 1 && !anyRealResult;
 
   return (
     <div className="round">
@@ -77,32 +79,44 @@ export default function RoundPanel({
       </div>
 
       {!currentRound.map && admin && (
-        <p className="hint">Tip: pick this round’s map from the control beside it in the bracket.</p>
+        <p className="hint">Tip: pick this round's map in the bracket section below.</p>
       )}
 
-      <div className="matchups">
-        {currentRound.matchups.map((m, i) => {
-          const aWon = m.winnerId === m.aId;
-          const bWon = m.winnerId === m.bId;
-          const Fighter = ({ id, won, lost }: { id: string | null; won: boolean; lost: boolean }) => {
-            const label = <>{name(id)}{isSub(id) && <em> (sub)</em>}{won && ' 🏆'}</>;
-            const cls = `fighter${won ? ' won' : ''}${lost ? ' lost' : ''}${admin ? '' : ' static'}`;
-            return admin
-              ? <button className={cls} onClick={() => id && onResolve(m.id, id)}>{label}</button>
-              : <span className={cls}>{label}</span>;
-          };
-          return (
-            <div key={m.id} className={`matchup${m.winnerId ? ' resolved' : ''}`}>
-              <span className="mu-num">#{i + 1}</span>
-              <Fighter id={m.aId} won={aWon} lost={bWon} />
-              <span className="vs">VS</span>
-              <Fighter id={m.bId} won={bWon} lost={aWon} />
-            </div>
-          );
-        })}
-      </div>
+      {/* Bye notice */}
+      {byeMatchups.length > 0 && (
+        <div className="bye-notice">
+          ⏫ {byeMatchups.map(m => name(m.aId)).join(', ')} advance{byeMatchups.length === 1 ? 's' : ''} automatically (bye)
+        </div>
+      )}
 
-      {admin && !allResolved && <p className="hint">Tap each match’s winner as players report results.</p>}
+      {/* Real matchups */}
+      {realMatchups.length > 0 && (
+        <div className="matchups">
+          {realMatchups.map((m, i) => {
+            const aWon = m.winnerId === m.aId;
+            const bWon = m.winnerId === m.bId;
+            const Fighter = ({ id, won, lost }: { id: string | null; won: boolean; lost: boolean }) => {
+              const label = <>{name(id)}{isSub(id) && <em> (sub)</em>}{won && ' 🏆'}</>;
+              const cls = `fighter${won ? ' won' : ''}${lost ? ' lost' : ''}${admin ? '' : ' static'}`;
+              return admin
+                ? <button className={cls} onClick={() => id && onResolve(m.id, id)}>{label}</button>
+                : <span className={cls}>{label}</span>;
+            };
+            return (
+              <div key={m.id} className={`matchup${m.winnerId ? ' resolved' : ''}`}>
+                <span className="mu-num">#{i + 1}</span>
+                <Fighter id={m.aId} won={aWon} lost={bWon} />
+                <span className="vs">VS</span>
+                <Fighter id={m.bId} won={bWon} lost={aWon} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {admin && realMatchups.length > 0 && !realAllDone && (
+        <p className="hint">Tap each match's winner as players report results.</p>
+      )}
       {admin && allResolved && !isFinals && (
         <button className="primary big" onClick={onBeginNext}>End Round → Begin Next Round</button>
       )}
