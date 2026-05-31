@@ -10,7 +10,7 @@ const PIN_KEY = 'brawl_pin';
 
 export default function App() {
   const {
-    players, rounds, activeRound, started, canStart, championId, currentRound, isFinals,
+    players, rounds, activeRound, started, canStart, championId, currentRound, isFinals, loading,
     addPlayer, removePlayer, seedBracket, reseed, setMap, resolveMatchup, beginNextRound, resetAll,
   } = useTournament();
 
@@ -46,6 +46,10 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {loading ? (
+        <section className="card"><p className="hint">Loading tournament data...</p></section>
+      ) : (<>
 
       {/* Rules */}
       <section className="card rules-card">
@@ -123,6 +127,8 @@ export default function App() {
           onSetMap={setMap}
         />
       </section>
+
+      </>)}
 
       {(modal === 'set' || modal === 'enter') && (
         <PinModal mode={modal} onClose={() => setModal(null)} onSet={handleSet} onVerify={handleVerify} />

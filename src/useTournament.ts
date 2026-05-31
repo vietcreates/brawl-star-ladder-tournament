@@ -1,10 +1,20 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { v4 as uuid } from 'uuid';
 import type { Player, Round } from './types';
 import { isPow2, prevPow2 } from './types';
 import { loadPlayers, savePlayers, loadRounds, saveRounds, loadActive, saveActive } from './store';
+import { supabase, online, TABLE, ROW_ID } from './supabase';
 
 type TState = { players: Player[]; rounds: Round[]; activeRound: number };
+
+function normalize(d: unknown): TState {
+  const o = (d ?? {}) as Partial<TState>;
+  return {
+    players: Array.isArray(o.players) ? o.players : [],
+    rounds: Array.isArray(o.rounds) ? o.rounds : [],
+    activeRound: typeof o.activeRound === 'number' ? o.activeRound : 1,
+  };
+}
 
 function loadLocal(): TState {
   return { players: loadPlayers(), rounds: loadRounds(), activeRound: loadActive() };
@@ -17,15 +27,12 @@ function saveLocal(s: TState) {
 
 /**
  * Sync winners upward through the bracket.
- * - Play-in winners flow into the bId slots of the last `extra` Round 1 matchups.
- * - Round 1+ winners flow into upper rounds normally.
  */
 function syncBracket(rounds: Round[]): Round[] {
   const rs = rounds.map(r => ({ ...r, matchups: r.matchups.map(m => ({ ...m })) }));
   const playInIdx = rs.findIndex(r => r.isPlayIn);
   const mainStart = playInIdx >= 0 ? playInIdx + 1 : 0;
 
-  // Play-in → Round 1 bId slots (last `extra` matchups of Round 1)
   if (playInIdx >= 0 && mainStart < rs.length) {
     const pi = rs[playInIdx];
     const r1 = rs[mainStart];
@@ -41,7 +48,6 @@ function syncBracket(rounds: Round[]): Round[] {
     });
   }
 
-  // Round 1 → Round 2 → … (standard sync)
   for (let r = mainStart + 1; r < rs.length; r++) {
     const prev = rs[r - 1];
     rs[r].matchups.forEach((m, k) => {
@@ -56,11 +62,41 @@ function syncBracket(rounds: Round[]): Round[] {
 }
 
 export function useTournament() {
-  const [state, setState] = useState<TState>(loadLocal);
+  const [state, setState] = useState<TState>(() => online ? { players: [], rounds: [], activeRound: 1 } : loadLocal());
+  const [loading, setLoading] = useState(online);
+
+  // Load from Supabase + subscribe to realtime changes
+  useEffect(() => {
+    if (!online || !supabase) return;
+    const sb = supabase;
+    let active = true;
+    const finish = () => { if (active) setLoading(false); };
+
+    sb.from(TABLE).select('data').eq('id', ROW_ID).maybeSingle().then(
+      ({ data }) => { if (active && data?.data) setState(normalize(data.data)); finish(); },
+      finish,
+    );
+
+    const ch = sb
+      .channel('tournament')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: `id=eq.${ROW_ID}` },
+        payload => {
+          const next = (payload.new as { data?: unknown })?.data;
+          if (next) setState(normalize(next));
+        })
+      .subscribe();
+
+    return () => { active = false; sb.removeChannel(ch); };
+  }, []);
 
   const commit = useCallback((next: TState) => {
     setState(next);
-    saveLocal(next);
+    if (online && supabase) {
+      supabase.from(TABLE).upsert({ id: ROW_ID, data: next, updated_at: new Date().toISOString() })
+        .then(({ error }) => { if (error) console.error('Sync failed:', error.message); });
+    } else {
+      saveLocal(next);
+    }
   }, []);
 
   const { players, rounds, activeRound } = state;
@@ -83,22 +119,20 @@ export function useTournament() {
   const buildSeed = useCallback((): TState | null => {
     const N = players.length;
     if (N < 2) return null;
-    const P = isPow2(N) ? N : prevPow2(N);  // main bracket size
-    const extra = N - P;                     // play-in winners needed
-    const playInCount = extra * 2;           // players in play-in
+    const P = isPow2(N) ? N : prevPow2(N);
+    const extra = N - P;
+    const playInCount = extra * 2;
 
-    // Shuffle all player IDs
     const ids = players.map(p => p.id);
     for (let i = ids.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [ids[i], ids[j]] = [ids[j], ids[i]];
     }
     const playInIds = ids.slice(0, playInCount);
-    const directIds = ids.slice(playInCount);   // length = directCount
+    const directIds = ids.slice(playInCount);
 
     const rs: Round[] = [];
 
-    // Play-in round (only if there are extra players)
     if (extra > 0) {
       const piMatchups = [];
       for (let i = 0; i < playInCount; i += 2) {
@@ -107,9 +141,6 @@ export function useTournament() {
       rs.push({ number: 0, map: null, matchups: piMatchups, isPlayIn: true });
     }
 
-    // Round 1:  (P/2 matchups)
-    //   First (P/2 - extra) matchups: two direct players each
-    //   Last  `extra` matchups:       one direct player (aId) + play-in winner (bId, null for now)
     const r1Matchups = [];
     let dIdx = 0;
     const fullDirect = P / 2 - extra;
@@ -121,7 +152,6 @@ export function useTournament() {
     }
     rs.push({ number: 1, map: null, matchups: r1Matchups });
 
-    // Rounds 2 … Finals (all TBD)
     const R = Math.log2(P);
     let count = P / 2;
     for (let r = 2; r <= R; r++) {
@@ -142,7 +172,7 @@ export function useTournament() {
 
   const reseed = useCallback(() => {
     if (rounds.length === 0) return;
-    if (rounds[0].matchups.some(m => m.winnerId)) return; // results already recorded
+    if (rounds[0].matchups.some(m => m.winnerId)) return;
     const next = buildSeed();
     if (next) commit(next);
   }, [rounds, buildSeed, commit]);
@@ -170,7 +200,7 @@ export function useTournament() {
   }, [commit]);
 
   return {
-    players, rounds, activeRound, started, canStart, championId, currentRound, isFinals,
+    players, rounds, activeRound, started, canStart, championId, currentRound, isFinals, loading, online,
     addPlayer, removePlayer, seedBracket, reseed, setMap, resolveMatchup, beginNextRound, resetAll,
   };
 }
